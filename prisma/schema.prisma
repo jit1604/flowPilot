@@ -1,13 +1,134 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// FlowPilot — SQLite MVP schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskStatus {
+  inbox
+  todo
+  in_progress
+  blocked
+  done
+}
+
+enum TaskPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum TaskSourceType {
+  manual
+  parsed
+  generated
+}
+
+enum ProjectStatus {
+  active
+  archived
+}
+
+enum PlanningRunStatus {
+  pending
+  completed
+  failed
+}
+
+/// How work fits your cognitive load — steers the local planner by time of day.
+enum WorkContext {
+  standard
+  deep_work
+  quick_win
+  admin
+  creative
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      ProjectStatus @default(active)
+  goal        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  tasks       Task[]
+}
+
+model Task {
+  id              String         @id @default(cuid())
+  title           String
+  description     String?
+  status          TaskStatus     @default(inbox)
+  priority        TaskPriority   @default(medium)
+  dueDate         DateTime?
+  estimatedEffort Int? // minutes
+  actualEffort    Int?
+  projectId       String?
+  project         Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parentTaskId    String?
+  parent          Task?          @relation("TaskHierarchy", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks        Task[]         @relation("TaskHierarchy")
+  sourceType      TaskSourceType @default(manual)
+  workContext     WorkContext    @default(standard)
+  /// Agent-suggested “do this next” flag (also derivable from recommender)
+  nextAction      Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  dependencies    TaskDependency[] @relation("TaskDependsOn")
+  prerequisiteFor TaskDependency[] @relation("TaskIsPrerequisite")
+
+  @@index([projectId])
+  @@index([parentTaskId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model TaskDependency {
+  id              String @id @default(cuid())
+  taskId          String
+  dependsOnTaskId String
+  task            Task   @relation("TaskDependsOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask   Task   @relation("TaskIsPrerequisite", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([taskId])
+  @@index([dependsOnTaskId])
+}
+
+model PlanningRun {
+  id               String            @id @default(cuid())
+  inputText        String
+  parsedSummary    String?
+  createdTasksJson String? // JSON snapshot of proposed tasks
+  status           PlanningRunStatus @default(pending)
+  createdAt        DateTime          @default(now())
+}
+
+model DailyPlan {
+  id                 String   @id @default(cuid())
+  /// Calendar day key YYYY-MM-DD (local semantics in app layer)
+  dateKey            String
+  summary            String?
+  suggestedTasksJson String?
+  createdAt          DateTime @default(now())
+
+  @@unique([dateKey])
+}
+
+/// One line “why this week matters” — surfaces on dashboard.
+model WeeklyIntention {
+  id        String   @id @default(cuid())
+  /// ISO week key e.g. 2026-W13
+  weekKey   String   @unique
+  statement String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
